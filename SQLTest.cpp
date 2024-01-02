@@ -12,6 +12,7 @@
 #define OUTCONNECTIONSTRINGMINLEN 1024
 
 SQLHENV henv = NULL;
+BOOL driveSuccesfullySelected = FALSE;
 SQLWCHAR DriverDescription[200];
 
 
@@ -21,6 +22,58 @@ void executeQuery(SQLHSTMT hstmt, printFuncP consolePrintFunc);
 
 void executeStoredProcedure(SQLHSTMT hstmt, printFuncP consolePrintFunc, std::wstring* dateStr);
 
+void printToConsole(const WCHAR* str) {
+	HANDLE stdOut;
+	stdOut = GetStdHandle(STD_OUTPUT_HANDLE);
+	DWORD written = 0;
+	WriteConsole(stdOut, str, wcslen(str), &written, NULL);
+
+	HWND consoleWindow = GetConsoleWindow();
+
+	RECT rect;
+
+	if (GetClientRect(consoleWindow, &rect) != 0) {
+		InvalidateRect(consoleWindow, &rect, TRUE);
+		UpdateWindow(consoleWindow);
+	}
+}
+
+void printErrorToConsole(const WCHAR* str) {
+	printToConsole(str);
+	printToConsole(L"\n");
+
+	char mbstr[400];
+	size_t retval;
+	errno_t error = wcstombs_s(&retval, mbstr, str, wcslen(str));
+
+	throw std::runtime_error(mbstr);
+}
+
+void getSQLError(SQLSMALLINT handleType, SQLHANDLE handle) {
+	SQLWCHAR SQLState[6];
+	SQLSMALLINT RecNumber = 1;
+	SQLINTEGER NativeErrorPtr = 0;
+	SQLWCHAR MessageText[400];
+	SQLSMALLINT TextLengthPtr = 0;
+
+	SQLRETURN checkRet = SQL_SUCCESS;
+
+	while (checkRet == SQL_SUCCESS) {
+		checkRet = SQLGetDiagRec(
+			handleType,
+			handle,
+			RecNumber++,
+			SQLState,
+			&NativeErrorPtr,
+			MessageText,
+			400,
+			&TextLengthPtr
+		);
+		printToConsole(MessageText);
+		printToConsole(L"\n");
+	}
+}
+
 SQLHENV getSQLEnvironmentHandle() {
 
 	if (henv == NULL) {
@@ -29,13 +82,15 @@ SQLHENV getSQLEnvironmentHandle() {
 		ret = SQLAllocHandle(SQL_HANDLE_ENV, SQL_NULL_HANDLE, &henv);
 
 		if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-			std::runtime_error("Failed to alloc environment handle\n");
+			getSQLError(SQL_HANDLE_ENV, SQL_NULL_HANDLE);
+			printErrorToConsole(L"Failed to alloc environment handle\n");
 		}
 
 		ret = SQLSetEnvAttr(henv, SQL_ATTR_ODBC_VERSION, (SQLPOINTER)SQL_OV_ODBC3, 0);
 
 		if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-			std::runtime_error("Failed to set environment attribute\n");
+			getSQLError(SQL_HANDLE_ENV, henv);
+			printErrorToConsole(L"Failed to set environment attribute\n");
 		}
 		
 	}
@@ -104,14 +159,15 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 	SQLRETURN ret;
 	SQLHDBC hcon;
 
-	if (henv == NULL) {
+	if (henv == NULL || !driveSuccesfullySelected) {
 		chooseSQLDriver(hWnd);
 	}
 
 	ret = SQLAllocHandle(SQL_HANDLE_DBC, getSQLEnvironmentHandle(), &hcon);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to alloc connection handle\n");
+		getSQLError(SQL_HANDLE_ENV, getSQLEnvironmentHandle());
+		printErrorToConsole(L"Failed to alloc connection handle\n");
 	}
 
 	std::wstring connectionString = L"";
@@ -141,6 +197,10 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 
 	connectionString.shrink_to_fit();
 
+	printToConsole(L"Connection string: \n");
+	printToConsole(connectionString.c_str());
+	printToConsole(L"\n\n");
+
 	SQLSMALLINT outConnStringLen = 0;
 
 
@@ -156,31 +216,14 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 	);
 
 	if (ret != SQL_SUCCESS) {
-
-		SQLWCHAR SQLState[6];
-		SQLSMALLINT RecNumber = 1;
-		SQLINTEGER NativeErrorPtr = 0;
-		SQLWCHAR MessageText[400];
-		SQLSMALLINT TextLengthPtr = 0;
-
-		SQLRETURN checkRet = SQL_SUCCESS;
-
-		while (checkRet == SQL_SUCCESS) {
-			checkRet = SQLGetDiagRec(
-				SQL_HANDLE_DBC,
-				hcon,
-				RecNumber++,
-				SQLState,
-				&NativeErrorPtr,
-				MessageText,
-				400,
-				&TextLengthPtr
-			);
-		}
+		getSQLError(SQL_HANDLE_DBC, hcon);
 
 		if (ret != SQL_SUCCESS_WITH_INFO) {
-			std::runtime_error("Failed to connect\n");
+			printErrorToConsole(L"Failed to connect\n");
 		}
+	}
+	else {
+		driveSuccesfullySelected = TRUE;
 	}
 
 	// STEP 2: INITIALIZE
@@ -190,7 +233,8 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 	ret = SQLAllocHandle(SQL_HANDLE_STMT, hcon, &hstmt);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to alloc statement handle\n");
+		getSQLError(SQL_HANDLE_DBC, hcon);
+		printErrorToConsole(L"Failed to alloc statement handle\n");
 	}
 
 	if (dateStr) {
@@ -205,7 +249,8 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 	ret = SQLEndTran(SQL_HANDLE_DBC, hcon, SQL_COMMIT);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to commit transaction\n");
+		getSQLError(SQL_HANDLE_DBC, hcon);
+		printErrorToConsole(L"Failed to commit transaction");
 	}
 
 	// STEP 6: DISCONNECT
@@ -230,7 +275,8 @@ void executeQuery(SQLHSTMT hstmt, printFuncP consolePrintFunc) {
 	ret = SQLPrepare(hstmt, (SQLWCHAR*)query.c_str(), SQL_NTS);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to prepare statement\n");
+		getSQLError(SQL_HANDLE_STMT, hstmt);
+		printErrorToConsole(L"Failed to prepare statement");
 	}
 	else {
 		ret = SQLExecute(hstmt);
@@ -238,7 +284,8 @@ void executeQuery(SQLHSTMT hstmt, printFuncP consolePrintFunc) {
 		if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
 
 			if (ret != SQL_NO_DATA) {
-				std::runtime_error("Failed to prepare statement\n");
+				getSQLError(SQL_HANDLE_STMT, hstmt);
+				printErrorToConsole(L"Failed to prepare statement");
 			}
 		}
 		else {
@@ -263,7 +310,8 @@ void executeStoredProcedure(SQLHSTMT hstmt, printFuncP consolePrintFunc, std::ws
 	ret = SQLBindParameter(hstmt, ParamNum, InputOutputType, ValueType, ParameterType, 255, 0, (SQLPOINTER)dateStr->c_str(), dateStr->length(), NULL);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to bind parameter\n");
+		getSQLError(SQL_HANDLE_STMT, hstmt);
+		printErrorToConsole(L"Failed to bind parameter");
 	}	
 
 	SQLWCHAR ParameterValueOut[255];
@@ -276,7 +324,8 @@ void executeStoredProcedure(SQLHSTMT hstmt, printFuncP consolePrintFunc, std::ws
 	ret = SQLBindParameter(hstmt, ParamNum, InputOutputType, ValueType, ParameterType, 255, 0, (SQLPOINTER)ParameterValueOut, 255, NULL);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to bind parameter\n");
+		getSQLError(SQL_HANDLE_STMT, hstmt);
+		printErrorToConsole(L"Failed to bind parameter");
 	}
 	else {
 
@@ -285,28 +334,8 @@ void executeStoredProcedure(SQLHSTMT hstmt, printFuncP consolePrintFunc, std::ws
 		ret = SQLExecDirect(hstmt, (SQLWCHAR*)callProcedureStatement.c_str(), callProcedureStatement.length());
 
 		if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-
-			SQLWCHAR SQLState[6];
-			SQLSMALLINT RecNumber = 1;
-			SQLINTEGER NativeErrorPtr = 0;
-			SQLWCHAR MessageText[400];
-			SQLSMALLINT TextLengthPtr = 0;
-
-			SQLRETURN checkRet = SQL_SUCCESS;
-
-			while (checkRet == SQL_SUCCESS) {
-				checkRet = SQLGetDiagRec(
-					SQL_HANDLE_STMT,
-					hstmt,
-					RecNumber++,
-					SQLState,
-					&NativeErrorPtr,
-					MessageText,
-					400,
-					&TextLengthPtr
-				);
-			}
-			std::runtime_error("Failed to execute stored procedure\n");
+			getSQLError(SQL_HANDLE_STMT, hstmt);
+			printErrorToConsole(L"Failed to execute stored procedure");
 		}
 		else {
 			std::wstring consoleLine = L"VERIFICANDO FERIADO EM: " + (*dateStr) + L" : " + std::wstring(ParameterValueOut) + L"\n";
@@ -330,7 +359,8 @@ void fetchDataFromStatement(SQLHSTMT hstmt, printFuncP consolePrintFunc) {
 	ret = SQLNumResultCols(hstmt, &numCols);
 
 	if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-		std::runtime_error("Failed to get number of columns\n");
+		getSQLError(SQL_HANDLE_STMT, hstmt);
+		printErrorToConsole(L"Failed to get number of columns");
 	}
 
 	if (numCols != 0) {
@@ -357,7 +387,8 @@ void fetchDataFromStatement(SQLHSTMT hstmt, printFuncP consolePrintFunc) {
 			);
 
 			if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-				std::runtime_error("Failed to get column description\n");
+				getSQLError(SQL_HANDLE_STMT, hstmt);
+				printErrorToConsole(L"Failed to get column description");
 			}
 		}
 
@@ -367,15 +398,17 @@ void fetchDataFromStatement(SQLHSTMT hstmt, printFuncP consolePrintFunc) {
 		ret = SQLBindCol(hstmt, 2, SQL_C_WCHAR, &date, sizeof(date), &Strlen_or_IndPtr);
 
 		if (ret != SQL_SUCCESS && ret != SQL_SUCCESS_WITH_INFO) {
-			std::runtime_error("Failed to bind column\n");
+			getSQLError(SQL_HANDLE_STMT, hstmt);
+			printErrorToConsole(L"Failed to bind column");
 		}
 		else {
 			ret = SQL_SUCCESS;
 			while (ret == SQL_SUCCESS) {
 				ret = SQLFetch(hstmt);
 
-				if (ret != SQL_ERROR) {
-					std::runtime_error("Failed to fetch row\n");
+				if (ret == SQL_ERROR) {
+					getSQLError(SQL_HANDLE_STMT, hstmt);
+					printErrorToConsole(L"Failed to fetch row");
 				}
 
 				if (ret == SQL_SUCCESS) {

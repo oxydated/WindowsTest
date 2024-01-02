@@ -4,6 +4,7 @@
 #include "framework.h"
 #include <CommCtrl.h>
 #include <string>
+#include <iostream>
 #include "WindowsTest.h"
 #include "SQLTest.h"
 #include "HTTPTest.h"
@@ -137,11 +138,23 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 	LONG_PTR lpResult;
 
 	std::wstring URL = L"demo5960524.mockable.io";
+    FILE* streamIn;
+    FILE* streamOut;
 
 	switch (message)
     {
     case WM_CREATE:
         AllocConsole();
+
+        if (freopen_s(&streamIn, "CONIN$", "r", stdin) != 0) {
+            std::cerr << "Failed to redirect stdin to console" << std::endl;
+            return 1;
+        }
+
+        if (freopen_s(&streamOut, "CONOUT$", "w", stdout) != 0) {
+            std::cerr << "Failed to redirect stdout to console" << std::endl;
+            return 1;
+        }
         consoleWindow = GetConsoleWindow();
         NEWVALUE = 0x0000000014ef0000 | WS_VISIBLE | WS_CHILD;
         lpResult = SetWindowLongPtr(consoleWindow, GWL_STYLE, WS_VISIBLE | WS_CHILD | WS_CLIPSIBLINGS );
@@ -172,10 +185,26 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 				DialogBox(hInst, MAKEINTRESOURCE(IDD_DATE_PICKER_BOX), hWnd, DatePicker);
 				break;
 			case ID_DB_LISTARFERIADOS:
-				connectAndFetchFromDB(hWnd, printToConsole);
+                try {
+                    connectAndFetchFromDB(hWnd, printToConsole);
+                }
+                catch (const std::runtime_error& e) {
+                    WCHAR toPrint[400];
+                    size_t retval;
+                    errno_t error = mbstowcs_s(&retval, toPrint, e.what(), strlen(e.what()));
+                    printToConsole(toPrint);
+                }
 				break;
             case ID_HTTP_GETTEST:
-                connectAndExecuteRequest(printToConsole, URL);
+                try {
+                    connectAndExecuteRequest(printToConsole, URL);
+                }
+                catch (const std::runtime_error& e) {
+                    WCHAR toPrint[400];
+                    size_t retval;
+                    errno_t error = mbstowcs_s(&retval, toPrint, e.what(), strlen(e.what()));
+                    printToConsole(toPrint);
+                }
                 break;                
 			default:
 				return DefWindowProc(hWnd, message, wParam, lParam);
@@ -251,7 +280,15 @@ INT_PTR CALLBACK DatePicker(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
     case WM_COMMAND:
         if (wParam == IDOK || wParam == IDCANCEL) {
             if (wParam == IDOK) {
-                connectAndFetchFromDB(hDlg, printToConsole, &dateString);
+                try {
+                    connectAndFetchFromDB(hDlg, printToConsole, &dateString);
+                }
+                catch (const std::runtime_error& e) {
+                    WCHAR toPrint[400];
+                    size_t retval;
+                    errno_t error = mbstowcs_s(&retval, toPrint, e.what(), strlen(e.what()));
+                    printToConsole(toPrint);
+                }
             }
             EndDialog(hDlg, TRUE);
         }
@@ -260,20 +297,4 @@ INT_PTR CALLBACK DatePicker(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPara
 
     }
     return (INT_PTR)FALSE;
-}
-
-void printToConsole(const WCHAR* str) {
-    HANDLE stdOut;
-    stdOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    DWORD written = 0;
-    WriteConsole(stdOut, str, wcslen(str), &written, NULL);        
-    
-    HWND consoleWindow = GetConsoleWindow();
-
-    RECT rect;
-
-    if (GetClientRect(consoleWindow, &rect) != 0) {
-        InvalidateRect(consoleWindow, &rect, TRUE);
-        UpdateWindow(consoleWindow);
-    }
 }

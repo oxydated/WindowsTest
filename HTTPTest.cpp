@@ -1,5 +1,16 @@
 #include "HTTPTest.h"
 #include <cstdlib>
+#include <sstream>
+#include <iomanip>
+#include <string>
+
+
+void thowError(std::string str) {
+	DWORD error = GetLastError();
+	std::stringstream stream;
+	stream << str << " error: " << "0x" << std::setw(8) << std::setfill('0') << std::hex << error << std::endl;
+	throw std::runtime_error(stream.str());
+}
 
 
 void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
@@ -13,7 +24,7 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 	);
 
 	if (hSession == NULL) {
-		std::runtime_error("Failed to open HTTP session!\n");
+		thowError("Failed to open HTTP session!");
 		return;
 	}
 
@@ -25,8 +36,7 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 	);
 
 	if (hConn == NULL) {
-		DWORD error = GetLastError();
-		std::runtime_error("Failed to make a HTTP connection!\n");
+		thowError("Failed to make a HTTP connection!");
 		WinHttpCloseHandle(hSession);
 		return;
 	}
@@ -42,7 +52,7 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 	);
 
 	if (hRequest == NULL) {
-		std::runtime_error("Failed to open a HTTP request!\n");
+		thowError("Failed to open a HTTP request!");
 		WinHttpCloseHandle(hConn);
 		WinHttpCloseHandle(hSession);
 		return;
@@ -59,14 +69,13 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 	);
 
 	if (!bResult) {
-		std::runtime_error("Failed to send a HTTP request!\n");
+		thowError("Failed to send a HTTP request!");
 	}
 
 	bResult = WinHttpReceiveResponse(hRequest, NULL);
 
 	if (!bResult) {
-		DWORD error = GetLastError();
-		std::runtime_error("Failed to receive HTTP response!\n");
+		thowError("Failed to receive HTTP response!");
 	}
 	else {
 		BOOL keepReading = true;
@@ -76,8 +85,7 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 			keepReading = (bResult) && (bytesAvailable > 0);
 
 			if (!bResult) {
-				DWORD error = GetLastError();
-				std::runtime_error("Failed to get HTTP response bytes available!\n");
+				thowError("Failed to get HTTP response bytes available!");
 			}
 			else {
 				char* data = new char[bytesAvailable + 1];
@@ -88,8 +96,7 @@ void connectAndExecuteRequest(printFuncP consolePrintFunc, std::wstring URL) {
 					BOOL readResult = WinHttpReadData(hRequest, (LPVOID)data, bytesAvailable, &totalDownloaded);
 
 					if (!readResult) {
-						DWORD error = GetLastError();
-						std::runtime_error("Failed to read HTTP response data!\n");
+						thowError("Failed to read HTTP response data!");
 					}
 					else {
 						char* context = nullptr;
