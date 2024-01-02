@@ -51,6 +51,8 @@ INT_PTR CALLBACK DriverPicker(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 	SQLSMALLINT DescriptionLegth = 0;
 	SQLSMALLINT AttributesLength = 0;
 
+	int selectedIndex = 0;
+
 	switch (message) {
 
 	case WM_INITDIALOG:
@@ -61,19 +63,19 @@ INT_PTR CALLBACK DriverPicker(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 			ret = SQLDrivers(hEnv, SQL_FETCH_NEXT, DriverDescription, 200, &DescriptionLegth, NULL, 0, &AttributesLength);
 			ComboBox_AddString(hComb, DriverDescription);
 		}
-		
+		ComboBox_SetCurSel(hComb, 0);
+		return (INT_PTR)TRUE;
 		break;
 
-	//case WM_NOTIFY:
-
-
 	case WM_COMMAND:
-		//if (wParam == IDOK || wParam == IDCANCEL) {
-		//	if (wParam == IDOK) {
-		//		connectAndFetchFromDB(hDlg, printToConsole, &dateString);
-		//	}
-		//	EndDialog(hDlg, TRUE);
-		//}
+		if (wParam == IDOK || wParam == IDCANCEL) {
+			if (wParam == IDOK) {
+				hComb = GetDlgItem(hDlg, IDC_DRIVERCOMBO);
+				selectedIndex = ComboBox_GetCurSel(hComb);
+				ComboBox_GetLBText(hComb, selectedIndex, DriverDescription);
+			}
+			EndDialog(hDlg, TRUE);
+		}
 		return (INT_PTR)TRUE;
 		break;
 
@@ -83,8 +85,6 @@ INT_PTR CALLBACK DriverPicker(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPa
 
 void chooseSQLDriver(HWND hWnd)
 {
-	SQLHENV hEnv = getSQLEnvironmentHandle();
-
 	HMODULE hInst = GetModuleHandle(NULL);
 
 	DialogBox(hInst, MAKEINTRESOURCE(IDD_DRIVERDIALOG), hWnd, DriverPicker);
@@ -104,7 +104,9 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 	SQLRETURN ret;
 	SQLHDBC hcon;
 
-	chooseSQLDriver(hWnd);
+	if (henv == NULL) {
+		chooseSQLDriver(hWnd);
+	}
 
 	ret = SQLAllocHandle(SQL_HANDLE_DBC, getSQLEnvironmentHandle(), &hcon);
 
@@ -119,7 +121,9 @@ void connectAndFetchFromDB(HWND hWnd, printFuncP consolePrintFunc, std::wstring*
 #define __USE_CONNECTION_STRING__
 
 #ifdef __USE_CONNECTION_STRING__
-	connectionString += L"DRIVER={IBM DB2 ODBC DRIVER - IBMDBCL1};";
+	connectionString += L"DRIVER={";
+	connectionString += DriverDescription;
+	connectionString += L"}; ";
 	connectionString += L"Database=bludb;";
 	connectionString += L"Hostname=6667d8e9-9d4d-4ccb-ba32-21da3bb5aafc.c1ogj3sd0tgtu0lqde00.databases.appdomain.cloud;";
 	connectionString += L"PORT=30376;";
